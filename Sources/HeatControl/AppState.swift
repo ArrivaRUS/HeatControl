@@ -20,6 +20,7 @@ final class AppState: ObservableObject {
     @Published var gpuLoad: Double?
     @Published var gpuLoadHistory: [Double] = []
     @Published var sensors: [ThermalSensor] = []
+    @Published var battery: BatteryInfo?
     @Published var processCount: Int = 0
     @Published var historyDepth: TimeInterval = 0
     @Published var killMessage: String?
@@ -53,6 +54,7 @@ final class AppState: ObservableObject {
     nonisolated private let thermals = ThermalReader()
     nonisolated private let load = SystemLoad()
     nonisolated private let gpuMeter = GPULoad()
+    nonisolated private let batteryReader = BatteryReader()
     nonisolated private let queue = DispatchQueue(label: "heatcontrol.sampler", qos: .utility)
     private var timer: DispatchSourceTimer?
     private var killMessageTask: Task<Void, Never>?
@@ -74,6 +76,7 @@ final class AppState: ObservableObject {
     private var smGpuTemp: Double?
     private var smCpuLoad: Double?
     private var smGpuLoad: Double?
+    private var smBattery: BatteryInfo?
     private var bufCpuTempHistory: [Double] = []
     private var bufGpuTempHistory: [Double] = []
     private var bufCpuLoadHistory: [Double] = []
@@ -91,6 +94,7 @@ final class AppState: ObservableObject {
         if let v = smGpuTemp, gpuTemp != v { gpuTemp = v }
         if let v = smCpuLoad, cpuLoad != v { cpuLoad = v }
         if let v = smGpuLoad, gpuLoad != v { gpuLoad = v }
+        if battery != smBattery { battery = smBattery }
         queue.async { [weak self] in self?.tick() }
     }
 
@@ -141,11 +145,13 @@ final class AppState: ObservableObject {
         let top = sampler.top(window: window, groupByApps: grouping, limit: Self.listLimit)
         let count = sampler.processCount
         let depth = sampler.historyDepth
+        let batteryInfo = batteryReader.sample()
 
         Task { @MainActor [weak self] in
             self?.publish(top: top, count: count, depth: depth,
                           sensors: sensorList, cpu: cpu, gpu: gpu,
-                          load: loadValue, gpuLoad: gpuLoadValue)
+                          load: loadValue, gpuLoad: gpuLoadValue,
+                          battery: batteryInfo)
         }
     }
 
@@ -156,8 +162,10 @@ final class AppState: ObservableObject {
     // запускал бы анимации ради невидимых сдвигов на 0.1°.
     private func publish(top: [EnergyEntry], count: Int, depth: TimeInterval,
                          sensors: [ThermalSensor], cpu: Double?, gpu: Double?,
-                         load: Double?, gpuLoad gpuLoadValue: Double?) {
+                         load: Double?, gpuLoad gpuLoadValue: Double?,
+                         battery batteryInfo: BatteryInfo?) {
         // Всегда: сглаживание и лента истории
+        if let batteryInfo { smBattery = batteryInfo }
         if let cpu { smCpuTemp = Self.smoothQ(smCpuTemp, cpu, step: 0.5) }
         if let gpu { smGpuTemp = Self.smoothQ(smGpuTemp, gpu, step: 0.5) }
         if let load { smCpuLoad = Self.smoothQ(smCpuLoad, load, step: 1) }
@@ -189,6 +197,7 @@ final class AppState: ObservableObject {
         if let v = smGpuTemp, gpuTemp != v { gpuTemp = v }
         if let v = smCpuLoad, cpuLoad != v { cpuLoad = v }
         if let v = smGpuLoad, gpuLoad != v { gpuLoad = v }
+        if battery != smBattery { battery = smBattery }
 
         cpuTempHistory = bufCpuTempHistory
         gpuTempHistory = bufGpuTempHistory

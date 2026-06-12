@@ -43,6 +43,21 @@ func runProbe() {
                  sampler.processCount))
     print()
 
+    print("== Battery ==")
+    if let b = BatteryReader().sample() {
+        print(String(format: "  charge: %d%%  health: %.1f%% (%d/%d mAh)  cycles: %d",
+                     b.percent, b.healthPercent, b.fullChargeCapacitymAh, b.designCapacitymAh, b.cycleCount))
+        print(String(format: "  temp: %.1f°C  voltage: %.2fV  amperage: %+.2fA  battery: %+.1fW  system: %@",
+                     b.temperature, b.voltage, b.amperage, b.batteryWatts,
+                     b.systemWatts.map { String(format: "%.1fW", $0) } ?? "n/a"))
+        if b.externalConnected {
+            print("  adapter: \(b.adapterName ?? "?") · \(b.adapterWatts ?? 0)W")
+        }
+    } else {
+        print("  (no battery)")
+    }
+    print()
+
     print("== Top apps (grouped) ==")
     for e in sampler.top(window: 10, groupByApps: true, limit: 8) {
         print(String(format: "  %6.1f%%  %-30s pid %d  (%d proc)",

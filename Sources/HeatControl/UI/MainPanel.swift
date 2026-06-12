@@ -1,22 +1,39 @@
 import SwiftUI
 import AppKit
 
+enum PanelTab {
+    case energy, battery
+}
+
 struct MainPanelView: View {
     let isFloating: Bool
     @EnvironmentObject var state: AppState
     @State private var showSettings = false
+    @State private var tab: PanelTab
 
     static let panelSize = CGSize(width: 376, height: 568)
+
+    init(isFloating: Bool, initialTab: PanelTab = .energy) {
+        self.isFloating = isFloating
+        _tab = State(initialValue: initialTab)
+    }
 
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
-                HeaderBar(isFloating: isFloating, showSettings: $showSettings)
-                GaugesRow()
-                SectionHeader()
-                ProcessListView()
-                FooterBar()
+                HeaderBar(isFloating: isFloating, showSettings: $showSettings, tab: $tab)
+                Group {
+                    if tab == .energy {
+                        GaugesRow()
+                        SectionHeader()
+                        ProcessListView()
+                    } else {
+                        BatteryView()
+                    }
+                }
+                FooterBar(tab: tab)
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.9), value: tab)
 
             if showSettings {
                 SettingsView(isPresented: $showSettings)
@@ -45,6 +62,7 @@ struct MainPanelView: View {
 private struct HeaderBar: View {
     let isFloating: Bool
     @Binding var showSettings: Bool
+    @Binding var tab: PanelTab
     @EnvironmentObject var state: AppState
 
     var body: some View {
@@ -67,6 +85,8 @@ private struct HeaderBar: View {
             }
             Spacer()
 
+            TabSwitcher(tab: $tab)
+
             if isFloating {
                 IconButton(systemName: "pin.slash", help: "Unpin floating panel") {
                     PanelController.shared.close()
@@ -84,6 +104,43 @@ private struct HeaderBar: View {
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+}
+
+// Переключатель вкладок: энергия / батарея
+private struct TabSwitcher: View {
+    @Binding var tab: PanelTab
+    @Namespace private var ns
+
+    var body: some View {
+        HStack(spacing: 2) {
+            tabButton(.energy, icon: "flame.fill", help: "Energy & temperatures")
+            tabButton(.battery, icon: "battery.100percent", help: "Battery health & usage")
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.white.opacity(0.05)))
+        .overlay(Capsule().stroke(Theme.cardStroke, lineWidth: 1))
+    }
+
+    private func tabButton(_ value: PanelTab, icon: String, help: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(tab == value ? Color.primary : Color.secondary.opacity(0.7))
+            .frame(width: 30, height: 20)
+            .background {
+                if tab == value {
+                    Capsule()
+                        .fill(Color.white.opacity(0.13))
+                        .matchedGeometryEffect(id: "tab", in: ns)
+                }
+            }
+            .contentShape(Capsule())
+            .onTapGesture {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
+                    tab = value
+                }
+            }
+            .help(help)
     }
 }
 
@@ -300,6 +357,7 @@ private struct SectionHeader: View {
 // MARK: - Футер
 
 private struct FooterBar: View {
+    let tab: PanelTab
     @EnvironmentObject var state: AppState
 
     private var windowBinding: Binding<Int> {
@@ -313,21 +371,34 @@ private struct FooterBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "clock")
-                    .font(.system(size: 9, weight: .semibold))
+            if tab == .energy {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    PillPicker(
+                        options: AppState.windowChoices.map(\.label),
+                        selection: windowBinding,
+                        fontSize: 9.5
+                    )
+                }
+                Spacer()
+                Text("\(state.processCount) processes")
+                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
-                PillPicker(
-                    options: AppState.windowChoices.map(\.label),
-                    selection: windowBinding,
-                    fontSize: 9.5
-                )
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: state.battery?.externalConnected == true
+                          ? "powerplug.fill" : "battery.100percent")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text(batteryStatus)
+                        .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
             }
-            Spacer()
-            Text("\(state.processCount) processes")
-                .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
             IconButton(systemName: "power", help: "Quit Heat Control", size: 11) {
                 NSApp.terminate(nil)
             }
@@ -337,6 +408,15 @@ private struct FooterBar: View {
         .background(alignment: .top) {
             Rectangle().fill(Theme.hairline).frame(height: 1)
         }
+    }
+
+    private var batteryStatus: String {
+        guard let b = state.battery else { return "No battery" }
+        if b.externalConnected {
+            if let w = b.adapterWatts { return "AC power · \(w)W adapter" }
+            return "AC power"
+        }
+        return "On battery"
     }
 }
 

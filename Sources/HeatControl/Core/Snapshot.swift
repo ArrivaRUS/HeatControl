@@ -18,6 +18,11 @@ func runSnapshot(to path: String) {
         .environment(\.colorScheme, .dark)
     render(main, to: path)
 
+    let battery = MainPanelView(isFloating: true, initialTab: .battery)
+        .environmentObject(state)
+        .environment(\.colorScheme, .dark)
+    render(battery, to: (path as NSString).deletingPathExtension + "_battery.png")
+
     let settings = SettingsView(isPresented: .constant(true))
         .frame(width: MainPanelView.panelSize.width, height: MainPanelView.panelSize.height)
         .environmentObject(state)
