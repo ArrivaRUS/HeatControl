@@ -1,0 +1,301 @@
+import SwiftUI
+import AppKit
+
+struct MainPanelView: View {
+    let isFloating: Bool
+    @EnvironmentObject var state: AppState
+    @State private var showSettings = false
+
+    static let panelSize = CGSize(width: 376, height: 568)
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                HeaderBar(isFloating: isFloating, showSettings: $showSettings)
+                GaugesRow()
+                SectionHeader()
+                ProcessListView()
+                FooterBar()
+            }
+
+            if showSettings {
+                SettingsView(isPresented: $showSettings)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.36, dampingFraction: 0.86), value: showSettings)
+        .overlay(alignment: .bottom) { ToastView() }
+        .frame(width: Self.panelSize.width, height: Self.panelSize.height)
+        .background(Theme.panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: isFloating ? 19 : 0, style: .continuous))
+        .overlay {
+            if isFloating {
+                RoundedRectangle(cornerRadius: 19, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Шапка
+
+private struct HeaderBar: View {
+    let isFloating: Bool
+    @Binding var showSettings: Bool
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7.5, style: .continuous)
+                    .fill(Theme.flameGradientV)
+                    .frame(width: 26, height: 26)
+                    .shadow(color: Theme.ember.opacity(0.45), radius: 6, y: 1)
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Heat Control")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(Machine.chipName)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+
+            if isFloating {
+                IconButton(systemName: "pin.slash", help: "Unpin floating panel") {
+                    PanelController.shared.close()
+                }
+            } else {
+                IconButton(systemName: "pin", help: "Pin as floating panel (always on top)") {
+                    PanelController.shared.show()
+                    closeMenuBarPopup()
+                }
+            }
+            IconButton(systemName: "gearshape", help: "Settings") {
+                showSettings.toggle()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+    }
+}
+
+func closeMenuBarPopup() {
+    for window in NSApp.windows where String(describing: type(of: window)).contains("MenuBarExtra") {
+        window.close()
+    }
+}
+
+enum Machine {
+    static let chipName: String = {
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        guard size > 0 else { return "Mac" }
+        var buf = [CChar](repeating: 0, count: size)
+        sysctlbyname("machdep.cpu.brand_string", &buf, &size, nil, 0)
+        return String(cString: buf)
+    }()
+}
+
+// MARK: - Ряд гейджей
+
+private struct GaugesRow: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            GaugeCard(
+                title: "CPU",
+                display: tempLabel(state.cpuTemp),
+                progress: tempProgress(state.cpuTemp),
+                color: state.cpuTemp.map(Theme.tempColor) ?? .gray,
+                history: state.cpuTempHistory
+            )
+            GaugeCard(
+                title: "GPU",
+                display: tempLabel(state.gpuTemp),
+                progress: tempProgress(state.gpuTemp),
+                color: state.gpuTemp.map(Theme.tempColor) ?? .gray,
+                history: state.gpuTempHistory
+            )
+            GaugeCard(
+                title: "LOAD",
+                display: "\(Int(state.cpuLoad.rounded()))%",
+                progress: state.cpuLoad / 100,
+                color: Theme.loadColor(state.cpuLoad),
+                history: state.cpuLoadHistory,
+                historyRange: 0...100
+            )
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func tempProgress(_ t: Double?) -> Double {
+        guard let t else { return 0 }
+        return (t - 30) / (102 - 30)
+    }
+}
+
+private struct GaugeCard: View {
+    let title: String
+    let display: String
+    let progress: Double
+    let color: Color
+    let history: [Double]
+    var historyRange: ClosedRange<Double>? = nil
+
+    var body: some View {
+        VStack(spacing: 7) {
+            ZStack {
+                GaugeRing(progress: progress, color: color)
+                    .frame(width: 58, height: 58)
+                Text(display)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(1)
+                    .frame(width: 40)
+            }
+            .padding(.top, 2)
+            .animation(.easeOut(duration: 0.7), value: progress)
+
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(1.6)
+                .foregroundStyle(.secondary)
+
+            Sparkline(values: history, color: color, fixedRange: historyRange)
+                .frame(height: 22)
+                .padding(.horizontal, 2)
+        }
+        .padding(.vertical, 11)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Theme.cardFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Theme.cardStroke, lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Заголовок секции списка
+
+private struct SectionHeader: View {
+    @EnvironmentObject var state: AppState
+
+    private var groupingBinding: Binding<Int> {
+        Binding(
+            get: { state.groupByApps ? 0 : 1 },
+            set: { state.groupByApps = $0 == 0 }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("TOP ENERGY")
+                .font(.system(size: 9.5, weight: .bold))
+                .tracking(1.5)
+                .foregroundStyle(.secondary)
+            warmupNote
+            Spacer()
+            PillPicker(options: ["Apps", "Procs"], selection: groupingBinding)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 7)
+    }
+
+    @ViewBuilder
+    private var warmupNote: some View {
+        if state.historyDepth + 1 < state.windowSeconds {
+            HStack(spacing: 3) {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 7.5, weight: .bold))
+                Text("collecting \(Int(state.historyDepth))s / \(Int(state.windowSeconds))s")
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(Theme.amber.opacity(0.85))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
+            .background(Capsule().fill(Theme.amber.opacity(0.10)))
+        }
+    }
+}
+
+// MARK: - Футер
+
+private struct FooterBar: View {
+    @EnvironmentObject var state: AppState
+
+    private var windowBinding: Binding<Int> {
+        Binding(
+            get: {
+                AppState.windowChoices.firstIndex { $0.seconds == state.windowSeconds } ?? 1
+            },
+            set: { state.windowSeconds = AppState.windowChoices[$0].seconds }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                PillPicker(
+                    options: AppState.windowChoices.map(\.label),
+                    selection: windowBinding,
+                    fontSize: 9.5
+                )
+            }
+            Spacer()
+            Text("\(state.processCount) processes")
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            IconButton(systemName: "power", help: "Quit Heat Control", size: 11) {
+                NSApp.terminate(nil)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(alignment: .top) {
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+        }
+    }
+}
+
+// MARK: - Тост (результат kill)
+
+private struct ToastView: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        if let message = state.killMessage {
+            Text(message)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(Color(red: 0.16, green: 0.16, blue: 0.19).opacity(0.97))
+                        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                )
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .padding(.bottom, 52)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: state.killMessage)
+        }
+    }
+}
