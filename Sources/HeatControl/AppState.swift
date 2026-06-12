@@ -40,7 +40,7 @@ final class AppState: ObservableObject {
     }
 
     static let windowChoices: [(label: String, seconds: Double)] = [
-        ("10s", 10), ("1m", 60), ("5m", 300),
+        ("10s", 10), ("30s", 30), ("1m", 60),
     ]
     static let intervalChoices: [(label: String, seconds: Double)] = [
         ("1s", 1), ("2s", 2), ("5s", 5), ("10s", 10),
@@ -102,7 +102,13 @@ final class AppState: ObservableObject {
     private init() {
         groupByApps = defaults.object(forKey: "groupByApps") as? Bool ?? true
         let w = defaults.double(forKey: "windowSeconds")
-        windowSeconds = w > 0 ? w : 60
+        // Миграция: сохранённое окно, которого больше нет в списке → 1m
+        if Self.windowChoices.contains(where: { $0.seconds == w }) {
+            windowSeconds = w
+        } else {
+            windowSeconds = 60
+            defaults.set(60.0, forKey: "windowSeconds")
+        }
         let i = defaults.double(forKey: "updateInterval")
         updateInterval = i > 0 ? i : 2
         menuBarShowsTemp = defaults.object(forKey: "menuBarShowsTemp") as? Bool ?? true

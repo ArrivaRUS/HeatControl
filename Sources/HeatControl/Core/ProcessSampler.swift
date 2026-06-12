@@ -34,7 +34,7 @@ private struct Snapshot {
 
 final class ProcessSampler: @unchecked Sendable {
 
-    static let maxHistory: TimeInterval = 320 // чуть больше максимального окна в 5 минут
+    static let maxHistory: TimeInterval = 80 // с запасом больше максимального окна в 1 минуту
 
     private let lock = NSLock()
     private var snapshots: [Snapshot] = []
